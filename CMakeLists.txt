@@ -12,8 +12,11 @@ find_package(moveit_visual_tools REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(moveit_core REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(mb_msgs REQUIRED)
 include_directories(include)
-add_library(${PROJECT_NAME} SHARED src/MBPlanner.cpp src/MBRemapper.cpp)
+
+add_library(${PROJECT_NAME} SHARED src/MBPlanner.cpp src/MBRemapper.cpp src/MBService.cpp)
+
 ament_target_dependencies(
   ${PROJECT_NAME}
   rclcpp
@@ -22,7 +25,9 @@ ament_target_dependencies(
   Eigen3
   moveit_core
   sensor_msgs
+  mb_msgs
 )
+
 add_executable(remapping src/remapping.cpp)
 target_include_directories(remapping PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -34,6 +39,8 @@ ament_target_dependencies(
   sensor_msgs
 )
 target_link_libraries(remapping ${PROJECT_NAME})
+
+
 
 install (TARGETS
   ${PROJECT_NAME} LIBRARY

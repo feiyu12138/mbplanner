@@ -363,7 +363,7 @@ void MBPlanner::detachObject(const std::string& object_id){
         ->applyAttachedCollisionObject(attachedObj);
 }
 
-bool MBPlanner::closeGrip(const std::string& object_id){
+bool MBPlanner::closeGrip(){
     drawTitle("Close Grip");
     moveit_visual_tools_->trigger();
     grip_group_interface_->setNamedTarget("close");
@@ -384,7 +384,7 @@ bool MBPlanner::closeGrip(const std::string& object_id){
     }
 }
 
-bool MBPlanner::liftObject(const std::string& object_id){
+bool MBPlanner::liftObject(){
     geometry_msgs::msg::Pose objectPose;
     geometry_msgs::msg::Pose liftPose;
     updateACM(false);

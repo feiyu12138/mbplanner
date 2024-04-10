@@ -21,8 +21,8 @@ public:
     bool pickObject(const std::string& object_id);
     bool placeObject(const std::string& object_id, const std::string& target_id);
     bool openGrip();
-    bool closeGrip(const std::string& object_id);
-    bool liftObject(const std::string& object_id);
+    bool closeGrip();
+    bool liftObject();
     bool moveHome();
     void setHome();
     // bool movePose(const geometry_msgs::msg::Pose& target_pose);
