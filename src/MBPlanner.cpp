@@ -9,6 +9,8 @@
 #include <moveit/collision_detection/collision_matrix.h>
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 #include <moveit_msgs/msg/planning_scene.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <mbplanner/MBPlanner.hpp>
 
 namespace MBP{
@@ -19,8 +21,13 @@ MBPlanner::MBPlanner(const rclcpp::Node::SharedPtr& node):node_(node),logger_(no
     grip_group_interface_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(node_,"grip");
     planning_scene_interface_ = std::make_shared<moveit::planning_interface::PlanningSceneInterface>();
 }
+MBPlanner::~MBPlanner(){}
     
 void MBPlanner::initialize(){
+    node_->get_parameter("execute", execute_);
+    node_->get_parameter("target_topic", target_topic_);
+    joint_state_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(target_topic_,10);
+    joint_trajectory_pub_ = node_->create_publisher<trajectory_msgs::msg::JointTrajectory>("joint_trajectory",10);
     psm_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(node_,"robot_description");
     psm_->startSceneMonitor("/monitored_planning_scene");
     scene_ = std::make_unique<planning_scene_monitor::LockedPlanningSceneRW>(psm_);
@@ -39,10 +46,11 @@ void MBPlanner::initialize(){
         move_group_interface_->getRobotModel()};
     moveit_visual_tools_ = std::make_shared<moveit_visual_tools::MoveItVisualTools>(moveit_visual_tools);
     moveit_visual_tools_->deleteAllMarkers();
-    moveit_visual_tools_->loadRemoteControl();
-    
-    
+    moveit_visual_tools_->loadRemoteControl(); 
 }
+
+
+
 void MBPlanner::drawTitle(const std::string& title){
     auto msg = Eigen::Isometry3d::Identity();
     msg.translation().z() = 1.0; 
@@ -51,9 +59,11 @@ void MBPlanner::drawTitle(const std::string& title){
     rviz_visual_tools::WHITE,
     rviz_visual_tools::XLARGE);
 }
+
 void MBPlanner::prompt(const std::string& text){
     moveit_visual_tools_->prompt(text);
 }
+
 moveit_msgs::msg::CollisionObject
 MBPlanner::createObject(
     geometry_msgs::msg::Pose pose, 
@@ -108,6 +118,64 @@ MBPlanner::createAttachedObject(moveit_msgs::msg::CollisionObject object){
     AttachedObject.object.operation = AttachedObject.object.ADD;
     return AttachedObject;
 }
+std::vector<sensor_msgs::msg::JointState> 
+MBPlanner::planToJntStates(moveit::planning_interface::MoveGroupInterface::Plan plan,std::string group_name){
+    std::vector<sensor_msgs::msg::JointState> states;
+    std::vector<double> remainJntStates;
+    std::vector<std::string> remainJntNames;
+    std::vector<std::string> names = plan.trajectory_.joint_trajectory.joint_names;
+    if (group_name == "grip"){
+        remainJntStates = move_group_interface_->getCurrentJointValues();
+        remainJntNames = move_group_interface_->getJointNames();
+        
+    }
+    else{
+        remainJntStates = grip_group_interface_->getCurrentJointValues();
+        remainJntNames = grip_group_interface_->getJointNames();
+        remainJntStates.pop_back();
+        remainJntNames.pop_back();
+    }
+    for (auto& point: plan.trajectory_.joint_trajectory.points){
+        sensor_msgs::msg::JointState state;
+        state.header = plan.trajectory_.joint_trajectory.header;
+        std::vector<double> jointVals;
+        std::vector<std::string> jointNames;
+        if (group_name == "arm_dvrk"){
+            jointVals = point.positions;
+            jointNames = names;
+            jointVals.insert(jointVals.end(),remainJntStates.begin(),remainJntStates.end());
+            jointNames.insert(jointNames.end(),remainJntNames.begin(),remainJntNames.end());
+        }
+        else{
+            jointVals = remainJntStates;
+            jointNames = remainJntNames;
+            jointVals.insert(jointVals.end(),point.positions.begin(),point.positions.end());
+            jointNames.insert(jointNames.end(),names.begin(),names.end());
+        }
+        state.name = jointNames;
+        state.position = jointVals;
+        states.push_back(state);
+    }
+    return states;
+}
+void MBPlanner::executePlan(moveit::planning_interface::MoveGroupInterface::Plan plan, std::string group_name){
+    if (execute_!="topic"){
+        if (group_name == "arm_dvrk"){
+            move_group_interface_->execute(plan);
+        }
+        else{
+            grip_group_interface_->execute(plan);
+        }
+    }
+    if(execute_!="moveit"){
+        auto states = planToJntStates(plan,group_name);
+        for (auto& state: states){
+            joint_state_pub_->publish(state);
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    
+}
 
 std::pair<bool,moveit::planning_interface::MoveGroupInterface::Plan> 
 MBPlanner::plan(std::string group_name){
@@ -131,7 +199,7 @@ bool MBPlanner::openGrip(){
         prompt("Press 'Next' to open gripper");
         drawTitle("Open Grip Execution");
         moveit_visual_tools_->trigger();
-        grip_group_interface_->execute(result_.second);
+        executePlan(result_.second,"grip");
         return true;
     }
     else{
@@ -219,11 +287,12 @@ bool MBPlanner::approachObject(const std::string& object_id){
     approachPose = calculateApproachPose(objectPose,approach_offset_);
     move_group_interface_->setJointValueTarget(approachPose);
     result_ = plan("arm_dvrk");
+    // joint_trajectory_pub_->publish(result_.second.trajectory_.joint_trajectory);
     if (result_.first){
         prompt("Press 'Next' to approach object");
         drawTitle("Approach Object Execution");
         moveit_visual_tools_->trigger();
-        move_group_interface_->execute(result_.second);
+        executePlan(result_.second,"arm_dvrk");
         return true;
     }
     else{
@@ -251,7 +320,7 @@ bool MBPlanner::pickObject(const std::string& object_id){
         prompt("Press 'Next' to pick object");
         drawTitle("Pick Object Execution");
         moveit_visual_tools_->trigger();
-        move_group_interface_->execute(result_.second);
+        executePlan(result_.second,"arm_dvrk");
         attachObject(object_id);
         return true;
     }
@@ -303,7 +372,7 @@ bool MBPlanner::closeGrip(const std::string& object_id){
         prompt("Press 'Next' to close gripper");
         drawTitle("Close Grip Execution");
         moveit_visual_tools_->trigger();
-        grip_group_interface_->execute(result_.second);
+        executePlan(result_.second,"grip");
         return true;
     }
     else{
@@ -328,7 +397,7 @@ bool MBPlanner::liftObject(const std::string& object_id){
         prompt("Press 'Next' to lift object");
         drawTitle("Lift Object Execution");
         moveit_visual_tools_->trigger();
-        move_group_interface_->execute(result_.second);
+        executePlan(result_.second,"arm_dvrk");
         return true;
     }
     else{
@@ -356,7 +425,7 @@ bool MBPlanner::placeObject(const std::string& object_id, const std::string& tar
         prompt("Press 'Next' to place object");
         drawTitle("Place Object Execution");
         moveit_visual_tools_->trigger();
-        move_group_interface_->execute(result_.second);
+        executePlan(result_.second,"arm_dvrk");
         detachObject(object_id);
         return true;
     }
@@ -391,7 +460,7 @@ bool MBPlanner::moveHome(){
         prompt("Press 'Next' to move home");
         drawTitle("Move Home Execution");
         moveit_visual_tools_->trigger();
-        move_group_interface_->execute(result_.second);
+        executePlan(result_.second,"arm_dvrk");
         return true;
     }
     else{

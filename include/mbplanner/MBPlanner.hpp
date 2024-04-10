@@ -15,6 +15,7 @@ class MBPlanner
 {
 public:
     MBPlanner(const rclcpp::Node::SharedPtr& node);
+    ~MBPlanner();
     void initialize();
     bool approachObject(const std::string& object_id);
     bool pickObject(const std::string& object_id);
@@ -32,9 +33,13 @@ public:
 
 private:
     const rclcpp::Node::SharedPtr& node_;
+    std::string target_topic_ = "/test_topic";
+    std::string execute_ = "both";
     std::vector<double> home_;
     bool home_set_ = false;
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
     rclcpp::Logger logger_;
+    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_pub_;
     geometry_msgs::msg::Pose objPose_;
     Eigen::Vector3d approach_offset_ = Eigen::Vector3d(0.0,0.0,-0.01);
     Eigen::Vector3d pick_offset_ = Eigen::Vector3d(0.0,0.0,0.0);
@@ -65,6 +70,10 @@ private:
     get_grasp_acm(bool collision);
 
     void updateACM(bool collision);
+
+    std::vector<sensor_msgs::msg::JointState> planToJntStates(moveit::planning_interface::MoveGroupInterface::Plan plan,std::string group_name);
+
+    void executePlan(moveit::planning_interface::MoveGroupInterface::Plan plan, std::string group_name);
 
 
 };
